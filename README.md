@@ -37,4 +37,4 @@ This code is the culmination of a group project by students in the Spring 2021 s
 * Barry Kronenfeld (instructor)
 
 # Is this free to use?
-Yes, it is licensed with the open source MIT License. If you find this useful, any acknowledgement would be appreciated.
+Yes, it is licensed with the open source MIT License. If you find this useful, acknowledgement would be appreciated.
