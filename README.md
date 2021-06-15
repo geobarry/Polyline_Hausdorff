@@ -23,7 +23,9 @@ The code follows the general algorithm described in:
 [J.F. Hangou&#0235;t (1995). Computation of the Hausdorff distance between plane vector polylines. *Proceedings of the International Symposium on Computer-Assistated Cartography (AutoCarto XII).*](https://cartogis.org/docs/proceedings/archive/auto-carto-12/pdf/computation-of-the-hausdorff-distance-between-plane.pdf)
 
 # How robust is it?
-Moderately robust. Some modifications to the algorithm were made to handle special cases. Test functions are included for all subsidiary functions as well as the main function. The code has been tested on several cases including coincident, overlapping and perpendicular line segments with random transformations to catch problems involving floating point precision arithmetic. That said, only a few scenarios have been tested and further testing is warranted for production-level usage. To perform additional tests, add coordinates for pairs of polyines you wish to test to the `case` function in `test_utils.py` and then run `test_polyline_hausdroff.py`.
+Moderately robust. The code has been tested on several cases including coincident, overlapping and perpendicular line segments with random transformations to catch problems involving floating point precision arithmetic. Some modifications to Hangou&#0235;t's algorithm were made to correctly handle special cases. That said, only a few scenarios have been tested and further testing is warranted for production-level usage. 
+
+Test functions are included for all subsidiary functions as well as the main function. To perform additional tests, add coordinates for pairs of polyines you wish to test to the `case` function in `test_utils.py` and then run `test_polyline_hausdroff.py`.
 
 # How efficient is it?
 At present the code is very inefficient, O(n<sup>3</sup>). Efficiency could be improved with the use of a spatial index. 
