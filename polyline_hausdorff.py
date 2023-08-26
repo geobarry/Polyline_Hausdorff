@@ -87,37 +87,37 @@ def polyline_hausdorff(A,B):
         The index of the component (vertex or segment) of the source polyline 
         containing the source location. 
         If bool is True then srccomp is a segment, otherwise it is a vertex.
-    trgcomp1 : (bool, int)
-        Target component #1.
-        The index of the component of the other ("target") polyline that is 
-        closest to the source location.
-    trgcomp2 : (bool, int)
-        Target component #2.
-        A second component of the target polyline that is equally close to 
-        the source location, or None if only one target component was found. 
-        If the source component is a segment then then there will usually be 
-        two equidistant nearest locations on the target polyline.    
+    trglocs : [(x,y),xy]
+        The location of the target of the Hausdorff distance.
+    trgcomps : [(bool, int)]
+        List of components of the target polyline that is equally close to 
+        the source location. If the source component is a segment then then 
+        there will usually be two equidistant nearest locations on the target 
+        polyline.    
     """
     # check in both directions
-    h_dist_a,srcloca,srccompa,trgcompa1,trgcompa2 = hausdorff_unidirectional(A,B)
-    h_dist_b,srclocb,srccompb,trgcompb1,trgcompb2 = hausdorff_unidirectional(B,A)
+    h_dist_a,srcloca,srccompa,trgcompsa = hausdorff_unidirectional(A,B)
+    h_dist_b,srclocb,srccompb,trgcompsb = hausdorff_unidirectional(B,A)
     # determine which is source and which is target    
     if h_dist_a > h_dist_b:
         srcloc = srcloca
+        srcline = "A"
         trgline = B
-        trgcomp1 = trgcompa1
-        trgcomp2 = trgcompa2        
+        srccomp = srccompa
+        trgcomps = trgcompsa
+        h = h_dist_a        
     else:
         srcloc = srclocb
+        srcline = "B"
         trgline = A
-        trgcomp1 = trgcompb1
-        trgcomp2 = trgcompb2
+        srccomp = srccompb
+        trgcomps = trgcompsb
+        h = h_dist_b
     # determine target location(s)
-    trglocs = []
-    trglocs.append(hu.nearLoc(srcloc, trgline, trgcomp1))
-    if trgcomp2 != None:        
-        trglocs.append(hu.nearLoc(srcloc, trgline, trgcomp2))
-    return h_dist_a,srcloc,trglocs
+    trglocs = [hu.nearLoc(srcloc,trgline,trgcomp) for trgcomp in trgcomps]
+    
+    # report results
+    return h,srcloc,srcline,srccomp,trglocs,trgcomps
 
 
 def hausdorff_unidirectional(A,B):
@@ -145,12 +145,19 @@ def hausdorff_unidirectional(A,B):
         Another component of B that is the target of the Hausdorff distance, or
         None if there is only one target component.
     """
+
     # initialize component and distance lists
     vNearComp = []
     vertDist = []
+    # create index of B segments
+    B_seg_idx = hu.seg_idx(B)
+
     # get distance from each vertex on A to its nearest component on B
     for a in range(len(A)):
-        b = hu.nearSegment(A, B, a)
+        # **********
+        # function hu.nearSegment can be adjusted to use R-tree
+        # **********
+        b = hu.nearSegment(A, B, a, B_seg_idx)
         comp, d = hu.nearComponent(A, B, a, b)
         vNearComp.append(comp)
         vertDist.append(d)
@@ -159,28 +166,73 @@ def hausdorff_unidirectional(A,B):
     # get distance from segments on A to nearest components on B
     d_k_comps = []
     for a in segsToCheck:
-        comp_list = hu.candidateComponents(A,B,a)
-        d,k,comp1,comp2 = hausdorff_segment(A, B, a, vNearComp[a],vertDist[a],vNearComp[a+1],vertDist[a+1], comp_list)
-        d_k_comps.append((d,k,comp1,comp2))
+        comp_list = hu.candidateComponents(A,B,a,vertDist[a],vertDist[a+1],B_seg_idx)
+        near_comps = segment_traversal(A, B, a, vNearComp[a],vertDist[a],vNearComp[a+1],vertDist[a+1], comp_list)
+        d,k,comps = hausdorff_segment(near_comps)
+#         d,k,comps = hausdorff_segment(A, B, a, vNearComp[a],vertDist[a],vNearComp[a+1],vertDist[a+1], comp_list)
+        d_k_comps.append((d,k,comps))
     # Hausdorff distance is maximum of distances from vertices and segments
+    use_vert = True
     maxVertDist = max(vertDist)
-    maxSegInfo = max(d_k_comps, key = lambda x: x[0])
-    if maxVertDist > maxSegInfo[0]:
+    if len(d_k_comps)!=0:
+        maxSegInfo = max(d_k_comps, key = lambda x: x[0])
+        if maxSegInfo[0] >= maxVertDist:
+            use_vert = False
+    if use_vert:
         a = vertDist.index(maxVertDist)
         loc = A[a]
         srcComp = (False,a)
-        trgComp1 = vNearComp[a]
-        trgComp2 = None
+        trgComps = [vNearComp[a]]
         H = maxVertDist
-    else:
+    else: # use segment
         a = segsToCheck[d_k_comps.index(maxSegInfo)]
-        d,k,trgComp1,trgComp2 = maxSegInfo
+        d,k,trgComps = maxSegInfo
         loc = g.location(A,a,k)
         srcComp = (True,a)
         H = d
-    return H,loc,srcComp,trgComp1,trgComp2
+    
+    return H,loc,srcComp,trgComps
 
-def hausdorff_segment(A,B,a,startComp,startDist,endComp,endDist,comp_list,verbose = False,max_iterations = 1000000):
+def hausdorff_segment(seg_traversal, verbose = False):
+    """
+    identifies the Hausdorff distance from a traversal of a segment
+    Parameters
+    ----------
+    seg_traversal : [(float,float,comp,dist_rep),...] list of tuples 
+        list of (d, k, component, distance representation) along traversal of a
+    Returns
+    ----------
+    d : float
+        The directed Hausdorff distance from segment a to polyline B.
+    k : float
+        The k-value of the source of the Hausdorff distance along segment a.        
+    max_comps : [(bool, int)]
+        List of one or two components on B that is the target of the Hausdorff distance
+    """
+    w = 0
+    max_dist = 0
+    # Loop through traversal to get switch point with maximum distance
+    if verbose:
+        print("\npositions along A where nearest component on B changes:")
+    for i in range(len(seg_traversal)):
+        d,k,comp,dist_rep = seg_traversal[i]
+        if verbose:
+            print("{:.3f}: {} d={:.3f}".format(k,hu.component_label(comp),d))
+        if d > max_dist:
+            w = i
+            max_dist = d
+    # get k-value of maximum distance
+    k = seg_traversal[w][1]
+    # get one component if winner is zero, two components otherwise        
+    comps = [seg_traversal[w][2]]
+    if w > 0 and seg_traversal[w][2] != seg_traversal[w-1][2]:
+        comps.append(seg_traversal[w-1][2])
+    if verbose:
+        print("red dot is furthest point on A from B")
+        print("nearest components on B to red dot: {}".format(",".join([hu.component_label(comp)for comp in comps])))
+    return max_dist,k,comps
+
+def segment_traversal(A,B,a,startComp,startDist,endComp,endDist,comp_list,verbose = False,max_iterations = 1000000):
     """
     Computes the furthest distance from any point on segment a of polyline A 
     to the nearest point on polyline B
@@ -210,101 +262,84 @@ def hausdorff_segment(A,B,a,startComp,startDist,endComp,endDist,comp_list,verbos
         would cause an infinite loop.
     Returns
     ----------
+    list of (d,k,comp,rep)
     d : float
-        The directed Hausdorff distance from segment a to polyline B.
+        distance to component on B.
     k : float
-        The k-value of the source of the Hausdorff distance along segment a.        
-    max_comp1 : (bool, int)
-        First of (at least) two components on B that is the target of the Hausdorff distance
-    max_comp2 : (bool, int)
-        Second of (at least) two components on B that is the target of the Hausdorff distance
+        k-value of point along segment a.        
+    comp : (bool, int)
+        component on B 
+    rep : (bool, float, float)
+        distance representation of component
     """
     # We're going to "walk" along segment a from vertex a to vertex a+1,
     # keeping track of the nearest component on B as we go
 
-    # make sure near component to start of A is in list
+    # make sure near component to k=0 is in list
     if not startComp in comp_list:
         comp_list.append(startComp)
-    
+
     # pre-calculate distance representations and effective intervals
     drs = [hu.distanceRepresentation(A, B, a, c) for c in comp_list]
     eis = [hu.effectiveInterval(A, B, a, c) for c in comp_list]
-    
+   
     # intitialize to start of segment a (k=0)
-    prev_id = comp_list.index(startComp)
-    ei = eis[prev_id]
+    id = comp_list.index(startComp)
+    ei = eis[id]
     k = 0
+
+    # list of (k, d, component, distance representation) along traversal of a
+    startRep = hu.distanceRepresentation(A,B,a,startComp)
+    nearest_comps = [(startDist,0,startComp,startRep)]
+
     # in some cases, floating point precision errors will cause 
     # nearest component to have no effective interval.
     # for such cases, set the initial effective interval to [0,1]
     if ei==(float('-inf'),float('-inf')):
         ei = (0,1)
-    # initialize maximum distance and related information to further of
-    # start and end vertices of segment
-    if startDist > endDist:
-        max_comp1 = startComp    
-        max_d = startDist
-        max_k = 0 
-    else:
-        max_comp1 = endComp    
-        max_d = endDist
-        max_k = 1 
-    max_comp2 = None
-    
+
     if verbose:
-        print("\nDistance to beat: {}".format(max_d))
-        print("From k = {}".format(max_k))
-        print("To {}".format(hu.component_label(max_comp1)))
+        print("candidate components: {}".format(len(comp_list)))
+        print("\nMoving from {} (ei: {:.3f} - {:.3f}".format(hu.component_label(startComp),ei[0],ei[1]))
     
     # keep going until end of line segment is reached
     numIts = 0
-    while prev_id != -1 and numIts < max_iterations:
+    while id != -1 and numIts < max_iterations:
         numIts += 1
-        # report component we're moving from
+        # move to next component
         if verbose:
-            print("\nMoving from {}".format(hu.component_label(comp_list[prev_id])))
-            print("incoming ei: {}".format(ei))
-        # move to next component
-        new_id,ei,d,k = _updateComponent(A,B,a,comp_list,eis,drs,prev_id,ei)
+            print("initial effective interval: ({:.3f},{:.3f})".format(ei[0],ei[1]))
+        new_id,ei,d,k = _updateComponent(A,B,a,comp_list,eis,drs,id,ei,verbose)
         # record components, distance at switch point
-        if new_id != -1:
-            if d > max_d:
-                max_d = d
-                max_k = k
-                max_comp1 = comp_list[new_id]
-                max_comp2 = comp_list[prev_id]
-        # remove previous component from list
-        del comp_list[prev_id]
-        del drs[prev_id]
-        del eis[prev_id]
-        # move to next component
-        if prev_id < new_id: # we deleted prev_id so subtract one from new_id
-            prev_id = new_id - 1
-        else:
-            prev_id = new_id
+        if new_id != -1: # and comp_list[id] != nearest_comps[-1][2]:
+            nearest_comps.append((d,k,comp_list[new_id],drs[new_id]))
+            # *** CANNOT REMOVE LINE COMPONENTS FROM LIST
+            # # remove previous component from list if it is a vertex
+            if comp_list[id][0] == False: # component is a vertex
+                # delete component from all lists    
+                del comp_list[id]
+                del drs[id]
+                del eis[id]
+                # move to next component
+                if new_id > id: # we deleted id so subtract one from new_id
+                    new_id = new_id - 1
+        id = new_id
+        
         # report component we're moving to
-        if verbose and new_id != -1:
-            print("moving to {}".format(hu.component_label(comp_list[prev_id])))
-            print("k: {}".format(k))
-            print("ei: {}".format(ei))
-            print("d: {}".format(d))
+        if verbose and id != -1:
+            comp_label = hu.component_label(comp_list[id])
+            print("moving to {} k={:.3f} ei=({:.3f},{:.3f}) d={:.3f}".format(comp_label,k,ei[0],ei[1],d))
+    # add in final component at end of segment
+    endRep = hu.distanceRepresentation(A, B, a, endComp)
+    nearest_comps.append((endDist,1,endComp,endRep))
+    if verbose:
+        print("moving to {} k={:.3f} d={:.3f}".format(hu.component_label(endComp),1,endDist))
 
-    if verbose:                
-        # report final solution
-        a1 = A[a]
-        a2 = A[a+1]
-        x = a1[0] + max_k * (a2[0]-a1[0])
-        y = a1[1] + max_k * (a2[1]-a1[1])
-        loc = (x,y)
-        print("\nfurthest component(s) from {}: {},{}".format(hu.component_label((True,a)), hu.component_label(max_comp1), hu.component_label(max_comp2)))
-        print("distance: {}".format(max_d))
-        print("k-value: {}".format(max_k))
-        print("location:\t {}\t{}".format(loc[0],loc[1]))
-    return max_d, max_k, max_comp1, max_comp2
+    return nearest_comps
 
-def _updateComponent(A,B,a,comps, eis, drs, prev_id, prev_ei):
+def _updateComponent(A,B,a,comps, eis, drs, prev_id, prev_ei, verbose=False, tol = 0.000001):
     """
-    Finds the next component of B while walking alon gsegment a of A. 
+    Finds the next component of B while walking along segment a of A. 
     Simultaneously updates the current effective interval
 
     Parameters
@@ -317,7 +352,7 @@ def _updateComponent(A,B,a,comps, eis, drs, prev_id, prev_ei):
             The index of a segment on polyline A.
     comps : [component]
             List of candidate components on B that could be target of Hausdorff distance.
-    ei :    list of (float,float)
+    eis :    list of (float,float)
             K-values of effective intervals of above comps on segment a of A.
     drs :   list of (bool,float,float)
             Distance representations of above comps wrt seg a of A
@@ -325,6 +360,9 @@ def _updateComponent(A,B,a,comps, eis, drs, prev_id, prev_ei):
             ID in comps of previous component of polyline B.
     prev_ei : (float,float)
             Previous effective interval on seg a before update
+    tol:    float
+            Acceptable error tolerance. This is used to avoid floating-point
+            precision errors. Adjust at your own risk.
 
     Returns
     ----------
@@ -336,46 +374,153 @@ def _updateComponent(A,B,a,comps, eis, drs, prev_id, prev_ei):
                          and previous component to segment a
         float :          The k-value of the switch point
     """
+    # NOTES:
+    # A key omission in Hangouet seems to be how to handle 3-way intersections
+    # in the graph of distance along a segment. These are not so rare at the 
+    # start of a segment
+    # when the two polylines share some vertices, and in theory they 
+    # could happen anywhere.
+    
+    # To handled botuh three way intersection and floating-point precision errors:
+    # (a) define a small "tolerance" (tol)
+    # (b) Before switching to a new component at position k, 
+    #       > identify all alternate components with switch point less than k + tol
+    #       > choose component with shortest distance at k+tol (if in e.i.)
+    #       > include current component (i.e. no "switch") in above comparison
+    #       > make sure that effective interval starts at >= k + tol
+
+
+    # *********************
+    # NEW METHOD    
+
+    # FIND NEXT SWITCH POINT
     # initialize variables
+    cand_k = [2] * len(comps) # list of switch points for each component
     new_comp_id = -1
     new_ei = []
     k_min = 2
     # check all components, looking for one with earliest switch point with previous component
-    for cand_id in range(len(comps)):
+    if verbose:
+        comp_label = hu.component_label(comps[prev_id])
+        print("   FUNCTION: polyline_hausdorff.update_component")
+        print("   prev comp: {}   ei: ({:.3f},{:.3f})".format(comp_label,prev_ei[0],prev_ei[1]))
+        dummy = 0
+    for cand_id in range(len(comps)):        
         if cand_id != prev_id: # can't return same component!
+            if verbose:
+                cand_label = hu.component_label(comps[cand_id])
+                prev_label = hu.component_label(comps[prev_id])
+                print("   testing transition from {} to {}".format(prev_label,cand_label))
             cand_dr = drs[cand_id] #  distance representation of new candidate
             cand_ei = eis[cand_id] #  effective interval of new candidate
-            if len(cand_ei) > 0: # check if component has an effective interval
-                ks = hu.switchPoint(drs[prev_id], cand_dr) # k-values of switch points between current component and new candidate
+            # if verbose:
+            #     print('      ei: ({:.3f},{:.3f})'.format(cand_ei[0],cand_ei[1]))
+            if len(cand_ei) > 0 and cand_ei != (float('-inf'),float('-inf')): # check if component has an effective interval
+                ks = hu.switchPoint(drs[prev_id], cand_dr) # k-values of switch points w/ current component and new candidate
+                if verbose:
+                    # show calculation of distance representations
+                    dr_previous = hu.distanceRepresentation(A, B, a, comps[prev_id])
+                    dr_candidate = hu.distanceRepresentation(A, B, a, comps[cand_id])
+                    if len(ks) == 0:
+                        print("      no crossings found")
                 for k in ks:
-                    if 0 < k < 1: # switch point within segment
-                        if prev_ei[0] <= k <= prev_ei[1]:  # switch point in effective interval of previous component
-                            if cand_ei[0] <= k <= cand_ei[1]:   # switch point in effective interval of new candidate
-                                if cand_ei[1] > prev_ei[0]: # moving forward    
-                                    if k < k_min: # we've got a new winner
-                                        k_min = k
-                                        new_comp_id = cand_id
-                                        new_ei = (k_min,cand_ei[1])
+                    if verbose:
+                        if (k < 0) or (k > 1):
+                            print("      crossing k is not between 0-1")
+                    if 0 <= k <= 1: # crossing k is between 0-1
+                        if verbose:
+                            if (k < prev_ei[0]-tol) or (k > prev_ei[1]+tol):
+                                print("      cross point in effective interval of previous component")
+                        if prev_ei[0]-tol <= k <= prev_ei[1]+tol:  
+                            # Cross point in effective interval of previous component
+                            if verbose:
+                                if (k < cand_ei[0]-tol) or (k > cand_ei[1]+tol):
+                                    print("      Cross point in effective interval of this candidate")
+                            if cand_ei[0]-tol <= k <= cand_ei[1] + tol:   
+                                # cross point in effective interval of new candidate
+                                # note we want to go forward not backward
+                                if verbose:
+                                    if cand_ei[1] <= prev_ei[0] - tol:
+                                        print("      moving backwards")
+                                if cand_ei[1] > prev_ei[0] - tol: 
+                                    # moving forward    
+                                    if k < cand_k[cand_id]:
+                                        cand_k[cand_id] = k
+                                    if verbose:
+                                        if k >= k_min:
+                                            print("      k >= k_min")
+                                    if k < k_min: # probably this is redundant!
+                                        # we might have a new winner
+                                        # but need to check distance at tolerance
+                                        passes_tolerance_test = True
+                                        if k < prev_ei[0] + tol:
+                                            # only need to perform test if we have moved less than tolerance
+                                            k_check = prev_ei[0] + tol
+                                            prev_dist = hu.componentDistance(drs[prev_id], k_check, 1)
+                                            new_dist = hu.componentDistance(drs[cand_id], k_check, 1)
+                                            if new_dist > prev_dist:
+                                                if verbose:
+                                                    print("      fails tolerance test!")
+                                                passes_tolerance_test = False
+                                        if passes_tolerance_test:
+                                            if verbose:
+                                                print("      PASSED ALL TESTS!!!")
+                                            k_min = k
+                                            new_comp_id = cand_id
+    
+    # update effective interval, incrementing by at least tolerance
+    comp_label = hu.component_label(comps[new_comp_id])
+#     print("   SWITCH POINT: {:.3f} ({})".format(k_min,comp_label))
+    cand_ei = eis[new_comp_id]
+    new_ei = (max(k_min,prev_ei[0] + tol),cand_ei[1])
+    if verbose:
+        if new_comp_id != -1:
+            print("   winner: {}".format(hu.component_label(comps[new_comp_id])))
+        else:
+            print("   no switch point found, moving to next component...")
+
     # If no switch point is found and we haven't reached the end of the segment, 
-    # move to next node or vertex
-    # *** Hangout says to move to next sequential vertex on B, but I think we have to check both
-    #         sides
-    if new_comp_id == -1:
-        if prev_ei[1] < 1:
-            cand_comps = []
-            b = comps[prev_id][1]
-            if comps[prev_id][0] == True: # segment
-                cand_comps = [(False,b+i) for i in [0,1] if hu.compValid(len(B),(False,b+i))]
-            else: # vertex
-                cand_comps = [(True,b+i) for i in [-1,0] if hu.compValid(len(B),(True,b+i))]
-            cand_ids = [comps.index(c) for c in cand_comps if c in comps]
-            # choose component with higher effective interval    
-            if len(cand_ids) > 0:
-                new_comp_id = max(cand_ids, key = lambda id: max(eis[id]))
-                new_ei = hu.withinUnitInterval(eis[new_comp_id][0],eis[new_comp_id][1])
-                # use new component only if we are moving forward along a
-                if max(new_ei) < min(prev_ei):
-                    return (-1,None,None,None)
+    # move to adjacent node or vertex
+    # *** Hangout says to move to next sequential vertex, 
+    #     but actually we have to check both sides
+    if new_comp_id == -1 and prev_ei[1] < 1:
+        # let's see if this is ever invoked
+        comp_label = hu.component_label(comps[prev_id])
+        print("   adjacent component search invoked from {}".format(comp_label))
+        # get adjacent components
+        b = comps[prev_id][1]        
+        if comps[prev_id][0] == True: # segment
+            adj_comps = [(False,b+i) for i in [0,1] if hu.compValid(len(B),(False,b+i))]
+        else: # vertex
+            adj_comps = [(True,b+i) for i in [-1,0] if hu.compValid(len(B),(True,b+i))]
+        adj_ids = [comps.index(c) for c in adj_comps if c in comps]
+        # choose component with lowest effective interval above k    
+        if verbose:
+            for i in adj_ids:
+                comp = comps[i]
+                ei = eis[i]
+                comp_label = hu.component_label(comp)
+                print('   comp: {} ei: ({:.3f},{:.3f})'.format(comp_label,ei[0],ei[1]))
+        adj_ids = [i for i in adj_ids if max(eis[i]) > prev_ei[1]] # effective interval above k
+        if len(adj_ids) == 0:
+            if verbose:
+                print("   NO ADJACENT COMPONENTS")
+        else:    
+            if verbose:
+                print("   CHOOSING FROM TWO ADJACENT COMPONENTS")
+                print("   prev_ei: ({:.3f},{:.3f})".format(prev_ei[0],prev_ei[1]))
+                for i in adj_ids:
+                    dr = drs[i] #  distance representation of new candidate
+                    ei = eis[i] #  effective interval of new candidate
+                    ks = hu.switchPoint(drs[prev_id], dr) # k-values of switch points between current component and new candidate
+                    #print('   comp: {} ei: ({:.3f},{:.3f})  ks: {:.3f}'.format(comps[i],ei[0],ei[1],ks))
+            
+            new_comp_id = min(adj_ids, key = lambda id: min(eis[id])) # lowest
+            new_ei = hu.withinUnitInterval(eis[new_comp_id][0],eis[new_comp_id][1])
+            # use new component only if we are moving forward along a
+            if max(new_ei) < min(prev_ei):
+                return (-1,None,None,None)
+            
     # check that a new component was found
     if new_comp_id == -1:
         return (-1,None,None,None)
@@ -384,4 +529,7 @@ def _updateComponent(A,B,a,comps, eis, drs, prev_id, prev_ei):
         k = new_ei[0]        
         len_a = g.distance(A[a],A[a+1])
         d = hu.componentDistance(drs[new_comp_id], k, len_a)
+        if verbose:
+            print("   updating to {}".format(hu.component_label(comps[new_comp_id])))
+            print("   distance: {:.5f}".format(d))
         return (new_comp_id,new_ei,d,k)

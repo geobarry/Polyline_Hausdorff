@@ -59,13 +59,18 @@ def angle(v1,v2):
         # so angle is 180 degrees
         return __m.pi
     else:
-        # otherwise, calculate formula
-        half_tangent = __m.sqrt(numerator/denominator)
-        theta = 2 * __m.atan(half_tangent)    
-        theta = abs(theta)
-        if theta > __m.pi:
-            theta = 2*__m.pi-theta
-        return theta 
+        # if numerator is less than zero, it is due to floating point precision
+        # it should be very close to zero, and the angle is zero
+        if -0.000001 < numerator/denominator < 0:
+            return 0
+        else:
+            # otherwise, calculate formula
+            half_tangent = __m.sqrt(numerator/denominator)
+            theta = 2 * __m.atan(half_tangent)    
+            theta = abs(theta)
+            if theta > __m.pi:
+                theta = 2*__m.pi-theta
+            return theta 
 
 
 def area(pts,absolute=False):
@@ -159,7 +164,7 @@ def project_pt_to_line(p,a,b):
     # return as an (x,y) tuple
     return (outX,outY)
 
-def distance_to_line(p,a,b):
+def distance_to_line(p,a,b, include_sign = False):
     """
     Computes the perpendicular distance from a point to an infinite line.
     
@@ -171,6 +176,9 @@ def distance_to_line(p,a,b):
         Coordinates of a point on a line.
     b : (x,y)
         Coordinates of another point on a line.
+    include_sign : Boolean
+        if True, return value will be positive if point is to the left of
+        the line, negative if it is to the right
     Returns
     ----------
     float
@@ -178,7 +186,9 @@ def distance_to_line(p,a,b):
     """
     # code by BJK
     # area of triangle formed between point and line segment
-    trianglearea=abs(area([a,b,p]))
+    trianglearea = -area([a,b,p])
+    if include_sign == False:
+        trianglearea = abs(trianglearea)
     # length of line segment
     line_length=distance(a,b)
     # make sure line segment has a length
@@ -413,3 +423,57 @@ def project_out(a1,a2,b1,b2):
                 k = IK + dk
             return k
         
+def rotate_pts(pts, origin, deg_cw):
+    theta = __m.radians(deg_cw)
+    cos_theta = __m.cos(-theta)
+    sin_theta = __m.sin(-theta)
+    # shift to origin
+    p = origin
+    s = [(x[0]-p[0],x[1]-p[1]) for x in pts]
+    # rotate
+    rotated_pts = []
+    for p in s:
+        x = p[0] * cos_theta - p[1] * sin_theta
+        y = p[0] * sin_theta + p[1] * cos_theta
+        rotated_pts.append((x,y))
+    return rotated_pts
+
+def rotate_horizontal(pts, pts2 = None):
+    """
+    Rotates two sets of points so the first and last point 
+    of the first set form a horizontal line,
+    with the first point on the left and at the origin.
+
+    Parameters
+    ----------
+    pts : list of (x,y) tuples
+        the points to be rotated.
+
+    pts2 : list of (x,y) tuples (optional)
+        a second set of points to be rotated
+
+    Returns
+    -------
+    List of (x,y) tuples, or a tuple containing two lists of (x,y) tuples
+        The rotated points.
+    
+    """
+    # get point out from first point in horizontal direction
+    hz_pt = (pts[0][0]+100,pts[0][1])
+    # get angle between horizontal and line from first to last point
+    a = angle(pts[0],pts[1],hz_pt)
+    a = __m.degrees(a)
+    print(a)
+    # rotate
+    r = rotate_pts(pts,pts[0], a+180)
+    if pts2 != None:
+        r2 = rotate_pts(pts2,pts[0], a+180)
+    # shift to origin
+    minx = min([x[0] for x in r])
+    miny = min([x[1] for x in r])
+    r = [(x[0]-minx,x[1]-miny) for x in r]
+    if pts2 != None:
+        r2 = [(x[0]-minx,x[1]-miny) for x in r2]
+        return r,r2
+    else:
+        return r

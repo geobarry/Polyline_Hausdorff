@@ -6,6 +6,69 @@ Created on Wed May 26 13:29:02 2021
 """
 import math as m
 import utils_geom as g
+import numpy as np
+from rtree import index
+
+def vertDistAcross(vdr,interval, len_a,n=50):
+    """
+    returns a list of points defining the distance function from the vertex
+    
+    Parameters
+    ----------
+    vdr : vertex distance representation
+        As defined based on Hangouet
+    interval : (float, float)
+        Interval over which to get distances
+    len_a : float
+        Length of the line segment on which the vertex distance representation 
+        is defined
+    n : int
+        The number of equally spaced distance values to return.
+        
+    Returns
+    ----------
+    [(k,d)]
+        List of tuples of (k-value along the line segment, distance)
+    
+    """
+    # returns a list of points defining the distance function from the vertex
+    r = []
+    interval_length = min(interval[1],1)-max(interval[0],0)
+    for k in np.arange(max(interval[0],0),min(interval[1],1),interval_length/n):
+        d = vertDistance(vdr, k, len_a)
+        r.append((k,d))
+    return r
+
+def segDistAcross(sdr,interval,len_a,n=50):
+    """
+    returns a list of points defining the distance function from the segment
+    
+    Parameters
+    ----------
+    sdr : segment distance representation
+        As defined based on Hangouet
+    interval : (float, float)
+        Interval over which to get distances
+    len_a : float
+        Length of the line segment on which the segment distance representation 
+        is defined
+    n : int
+        The number of equally spaced distance values to return.
+        
+    Returns
+    ----------
+    [(k,d)]
+        List of tuples of (k-value along the line segment, distance)
+    
+    """
+
+    # returns a list of points defining the distance function from the segment
+    r = []
+    interval_length = min(interval[1],1)-max(interval[0],0)
+    for k in np.arange(max(interval[0],0),min(interval[1],1),interval_length/n):
+        d = segDistance(sdr, k, len_a)
+        r.append((k,d))
+    return r
 
 def componentDistance (dr,k,len_a):
     """
@@ -43,9 +106,9 @@ def component_label(comp):
         return "None"
     else:
         if comp[0] == True:
-            return"seg {}".format(comp[1])
+            return"s{}".format(comp[1])
         else:
-            return "vert {}".format(comp[1])
+            return "v{}".format(comp[1])
 
 def compValid(n_vert,comp):
     """
@@ -175,11 +238,22 @@ def segDistRep (A,B,a,b):
             k-value of intersection between two segments, or None if segments
             are parallel
         sin_theta : float
-            sine of angle between lines through segments, or q-distance between
-            lines if they are parallel.
+            sine of angle between lines through segments, 
+            but negative if cosine is negative
+            or q-distance between lines if they are parallel.
+        k_max : float
+            k-value of right hand vertex
     
-    # LJ and TJ
+    # LJ and TJ; k_max added by BK
     """
+
+    qb1 = g.distance_to_line(B[b],A[a],A[a+1],include_sign = True)
+    qb2 = g.distance_to_line(B[b+1],A[a],A[a+1],include_sign = True)
+    prjb1 = g.project_pt_to_line(B[b],A[a],A[a+1])
+    kb1 = g.kvalue(prjb1,A[a],A[a+1])
+    prjb2 = g.project_pt_to_line(B[b+1],A[a],A[a+1])
+    kb2 = g.kvalue(prjb2,A[a],A[a+1])
+
     # initiate list for results
     dist_rep = []  
     # Create a boolean statement saying that this is indeed a segment
@@ -189,12 +263,22 @@ def segDistRep (A,B,a,b):
     # if we've found an intersection, determine sin theta
     if x[0] != None:
         # If there is an intersection, where is it on the x-axis, and then append it
-        K = g.kvalue(x, A[a], A[a+1]) # convert to a k-value
-        dist_rep.append(K)
+        k_int = g.kvalue(x, A[a], A[a+1]) # convert to a k-value
+        dist_rep.append(k_int)
         # Find the angle created by the two lines
         s_rad = g.angle([A[a],A[a+1]],[B[b],B[b+1]])
         # Calculate the sine of the angle
         s = m.sin(s_rad)
+        # determine lean of b with respect to a
+        # use endpoint furthest from a to determine
+
+        if abs(qb1) > abs(qb2):
+            qb, prjb, kb = qb1, prjb1, kb1
+        else:
+            qb, prjb, kb = qb2, prjb2, kb2
+        if (qb > 0) != (kb > k_int):
+            # b leans backwards, so we will make sine theta negative
+            s = -s
         #Append the sine of the angle
         dist_rep.append(s)
     # Handle case of no intersection
@@ -210,8 +294,15 @@ def segDistRep (A,B,a,b):
         q = g.distance_to_line(B[b],A[a],A[a+1])
         # normalize by length of a
         q=q/g.distance(A[a], A[a+1])
+        # make negative if b is to the right of the line
+        if g.area([A[a],A[a+1],B[b]]) > 0:
+            q = -q
         # Append the distance
         dist_rep.append(q)
+    # add k-value of right hand of vertex
+    
+    dist_rep.append(max(kb1,kb2))
+    # convert to tuple before returning
     dist_rept = tuple(dist_rep)
     return dist_rept
 
@@ -276,8 +367,14 @@ def segEffectiveInterval(A,B,a,b, tolerance=0.000001):
     k1 = g.kvalue(prjout1,a1,a2)
     k2 = g.kvalue(prjout2,a1,a2)
     if abs(k1-k2) <= tolerance:
-        # segment is perpendicular, so effective interval is entire segment
-        return [0,1]
+        # segment is perpendicular, so 
+        
+        if (g.area([a1,a2,b1]) > 0) == (g.area([a1,a2,b2]) > 0):
+            # IF THEY DON'T CROSS effective interval is nothing
+            return [float('-inf'),float('-inf')]
+        else:
+            # IF THEY CROSS effective interval is entire segment 
+            return [0,1]
     else:
         # project out from each b vertex to segment a 
         k1 = g.project_out(a1,a2,b1,b2)
@@ -285,7 +382,7 @@ def segEffectiveInterval(A,B,a,b, tolerance=0.000001):
         # return them in sequence, bound to range [0,1]
         return withinUnitInterval(k1,k2)
 
-def switchPoint (dr1, dr2):
+def switchPoint (dr1, dr2, tol = 0.00000001):
     """
     Determines point along a where the nearest point on B switches from the 
     component represented by dr1 to the component represented by dr2.
@@ -296,10 +393,15 @@ def switchPoint (dr1, dr2):
         Distance representation 1
     dr2 : dr2
         Distance representation 2
+    b1 : component
+        first component of B
+    b2 : component
+        second component of B
+    B : coordinates of polyline B
 
     Returns
     -------
-    [float]	list of k-values
+    [float]	list of (at most 2) k-values
 
     """
     # input: segment, segment - return Seg Seg switch point
@@ -308,11 +410,11 @@ def switchPoint (dr1, dr2):
         return segseg
     # input: vertex, segment - return vert seg switch point
     elif dr1[0] == False and dr2[0] == True:
-        vertseg = vertSegSwitchPoint(dr1, dr2)
+        vertseg = vertSegSwitchPoint(dr1, dr2, from_vertex = True, tol = tol)
         return vertseg
     # input: segment, vertex - return vert seg switch point
     elif dr1[0] == True and dr2[0] == False:
-        vertseg = vertSegSwitchPoint(dr2, dr1)
+        vertseg = vertSegSwitchPoint(dr2, dr1, from_vertex = False, tol = tol)
         return vertseg
     # input: vertex, vertex - return vert vert switch point
     elif dr1[0] == False and dr2[0] == False:
@@ -366,7 +468,7 @@ def vertDistRep(A,B,a,b):
         k : float 
             k-value of the location of the perpendicular projection of b onto the line through a.
         q : float 
-            q-distance from b to the line through a.
+            q-distance from b to the line through a, negative if b is left of a
             
     @author: MT and TJ
     """
@@ -382,6 +484,9 @@ def vertDistRep(A,B,a,b):
     #run distance tool to find distance between the new point (k) and b
     q = g.distance(p, B[b])
     q = q/g.distance(A[a],A[a+1])
+    # make negative if b is to the right of the line
+    if g.area([A[a],A[a+1],B[b]]) > 0:
+        q = -q
     #append the result
     FinalList.append(q)
     FinalList = tuple(FinalList) 
@@ -547,11 +652,11 @@ def vertEffectiveInterval(A,B,a,b,tolerance=0.000001):
                 else:
                     return (float('-inf'),float('-inf'))
 
-def segSegSwitchPoint(dr1, dr2):
+def segSegSwitchPoint(dr1, dr2, tol = 0.00000001):
     """
-    Determines the k-values of the two locations along segment a that are equidistant 
-    to the two segments b1 and b2 represented by dr1 and dr2, i.e. the location at 
-    which the nearest component of a “switches” from b1 to b2.
+    Determines the k-value where segment A crosses from 
+    the Voronoi cell of the first segment
+    into the Voronoi cell of the second segment
 
     Parameters
     ----------
@@ -562,44 +667,63 @@ def segSegSwitchPoint(dr1, dr2):
 
     Returns
     -------
-    List of 1 or 2 floats representing k-value(s) of the switch points
+    List of 1 float representing k-value of the switch points
     
-    @author: Folaitan & Ljansen
+    @author: Folaitan & Ljansen; directional component added by BK
     """
     k = []
     if dr1[1] == None and dr2[1] == None: # both segments parallel to a
-        pass
+        return []
     elif dr1[1] == None: # first segment parallel to a
-        k_out_1 = dr2[1] + (dr1[2]/dr2[2])
-        k_out_2 = dr2[1] - (dr1[2]/dr2[2])
-        k.append(k_out_1)
-        k.append(k_out_2)
+        q = dr1[2] # distance from a to parallel segment
+        if abs(q) > tol:
+            k_out_1 = dr2[1] + (dr1[2]/dr2[2])
+            k_out_2 = dr2[1] - (dr1[2]/dr2[2])
+            k.append(min(k_out_1,k_out_2))
+        else:
+            return []
     elif dr2[1] == None: # second segment parallel to a
         k_out_1 = dr1[1] + ((dr2[2])/dr1[2])
         k_out_2 = dr1[1] - ((dr2[2])/dr1[2])
-        k.append(k_out_1)
-        k.append(k_out_2)
+        k.append(max(k_out_1,k_out_2))
     else: # neither segment parallel to a
         # create more readable variables
         k1 = dr1[1]
         k2 = dr2[1]
+        s1 = dr1[2]
+        s2 = dr2[2]
         # calculate alpha parameter
-        a = dr2[2]/dr1[2]
-        if a == 1: # first solution is not valid; return second solution
-            k_out_2 = (k1+a*k2)/(1+a)
-            k.append(k_out_2)
-        elif a == -1: # second solution is not valid; return first solution
+        a = s2/s1
+        if a == 1: # two segments are parallel
+            # first solution is not valid
+            # return second solution only if k2 > k1
+            if k2 > k1:
+                k_out_2 = (k1+a*k2)/(1+a)
+                k.append(k_out_2)
+            else:
+                return []
+        elif a == -1: # two segments are mirror images of each other
+            # second solution is not valid
+            # return first solution only if k2 > k1
+            if k2 > k1:
+                k_out_1 = (k1-a*k2)/(1-a)
+                k.append(k_out_1)
+            else:
+                return []
+        else: # there are two solutions
             k_out_1 = (k1-a*k2)/(1-a)
-            k.append(k_out_1)
-        else: # return both solutions
-            k_out_1 = (k1-a*k2)/(1-a)
-            k.append(k_out_1)
             k_out_2 = (k1+a*k2)/(1+a)
-            k.append(k_out_2)
+            # select solution based on which statement is further right
+            if abs(s2) < abs(s1):
+                # b2 is closer to parallel with segment a
+                k.append(max(k_out_1,k_out_2))
+            else:
+                # b1 is closer to parallel the segment a
+                k.append(min(k_out_1,k_out_2))
     # return values in ascending order, for consistency
     return sorted(k)
 
-def vertSegSwitchPoint(vdr, sdr):
+def vertSegSwitchPoint(vdr, sdr, from_vertex = True, tol = 0.00000001):
     """
     Determines the k-value of the location along segment a that is equidistant 
     to the input vertex and input segment, i.e. the location at which the nearest 
@@ -610,60 +734,114 @@ def vertSegSwitchPoint(vdr, sdr):
         distance representation of a vertex on B
     sdr : seg_rep : (True, k, sin_theta) or (True, none, q)
         distance representation of a segment on B
+    ks_max : float
+        The maximum K value of the input segment
+    from_vertex : Boolean
+        true if we are looking to go from the vertex to the segment
+        false if we are looking to go from the segment to the vertex
 
     Returns
     -------
-    [float,float]
-    List containing two floats representing the k-values of the switch points
+    [float]
+    List containing 0 or 1 floats representing the k-values of 
+    the switch point if it exists
     
-    @author: Folaitan & Ljansen
+    @author: Folaitan & Ljansen; directionality introduced by BK
     """
-    r_list = []
     # get distance representation values into more readable variables
     k_vert = vdr[1]
     q_vert = vdr[2]
     k_seg = sdr[1]
     sin_theta = sdr[2]
-    # three cases
-    if sin_theta== 1: # b segment is perpendicular to A
-        numerator = ((k_seg**2)-(k_vert**2)-(q_vert**2))
-        denominator = (2*k_seg) - (2*k_vert)
-        if denominator == 0: 
-            # point and line have same k-value, so this is the switch point
-            return [k_seg]
-        vertSegPoint = numerator/denominator
-        r_list.append(vertSegPoint)
-    else:
-        if sdr[1] == None: # b segment is parallel to a
-            q_seg = sin_theta # distance representation value is q not sin_theta
-            a = 1
-            b = -2*k_vert
-            c = k_vert**2 + q_vert**2 - q_seg**2
-        else: # normal case
-            a = (sin_theta**2)-1
-            b = (2*k_vert)-((2*k_seg)*(sin_theta**2))
-            c = ((k_seg**2)*(sin_theta**2))-(k_vert**2)-(q_vert**2)
-        inside_root = (b**2)-(4*a*c)
-        # catch floating point precision issues:
-        # better to show a switch point when there is none than to miss one
-        if -0.0000000000001 < inside_root < 0:
-            inside_root = 0                
+    ks_max = sdr[3]
+    
+    # three cases: segment b perpendicular, parallel, or oblique to A
+    if abs(sin_theta) == 1: 
+        # b segment is perpendicular to A
+        # only return a crossing if second component is right of first        
+        if k_seg == k_vert:
+            # point and line have same k-value, so no switching
+            return []
+        elif from_vertex != (k_vert > k_seg):
+            # going from vertex to segment but vertex is to the right
+            # or else going from segment to vertex but segment is to the right
+            # so no switching
+            return []
+        else:
+            # the component we want to go to is to the right
+            # so make the switch
+            numerator = ((k_seg**2)-(k_vert**2)-(q_vert**2))
+            denominator = (2*k_seg) - (2*k_vert)
+            vertSegPoint = numerator/denominator
+            return [vertSegPoint]
+    elif k_seg == None: 
+        # b segment is parallel to a
+        q_seg = sin_theta # distance representation value is q not sin_theta
+        a = 1
+        b = -2*k_vert
+        c = k_vert**2 + q_vert**2 - q_seg**2
+    else: # normal case
+        a = (sin_theta**2)-1
+        b = (2*k_vert)-((2*k_seg)*(sin_theta**2))
+        c = ((k_seg**2)*(sin_theta**2))-(k_vert**2)-(q_vert**2)
+    inside_root = (b**2)-(4*a*c)
+    # catch floating point precision issues:
+    if -tol < inside_root < tol:
+        inside_root = 0                
+    # check number of roots
+    if inside_root < 0:
         # if inside_root is less than zero, quadratic formula has no 
         # solution and there is no switch point to return
+        return []
+    elif inside_root == 0:
         # if it equals zero, there is one switch point
-        if inside_root >= 0:
-            r_list.append((-b + (m.sqrt(inside_root)))/(2*a))
-        if inside_root > 0:
-            r_list.append((-b - (m.sqrt(inside_root)))/(2*a))                
-    # let's put these in ascending order, just to be safe
-    return sorted(r_list)
+        # we have either a tangency or point is on line
+        try:
+            point_on_line = True
+            if k_seg == None: 
+                # segment is parallel to a
+                # just check if segment and vertex are on same side of a
+                if (q_vert > 0) != (q_seg > 0):
+                    point_on_line = False
+            elif (k_seg > k_vert) == ((q_vert > 0) == (sin_theta > 0)):
+                # the above returns True if 0 or 2 of the terms are true
+                # in which case segment B is tangent to parabolic Voronoi edge
+                point_on_line = False
+            if point_on_line:
+                # vertex is on segment; need to check which is right and
+                # make sure we get the vertex
+                if from_vertex and (ks_max - tol > k_vert):
+                    return [-b/(2*a)]
+                elif (from_vertex == False) and (k_vert >= ks_max - tol):
+                    return [-b/(2*a)]
+                else:
+                    return []
+            else:
+                # no need to switch
+                return []
+
+        except Exception as e:
+            print(e)
+            print("k_seg: {}".format(k_seg))
+            print("k_vert: {}".format(k_vert))
+            print("q_vert: {}".format(q_vert))
+            print("sin_theta: {}".format(sin_theta))
+            
+    if inside_root > 0:
+        # we have two solutions,  answer depends on which way we are going        
+        solution_1 = (-b - (m.sqrt(inside_root)))/(2*a)
+        solution_2 = (-b + (m.sqrt(inside_root)))/(2*a)
+        if from_vertex:
+            # pick larger solution
+            return [max(solution_1, solution_2)]
+        else:
+            return [min(solution_1, solution_2)]
 
             
 def vertVertSwitchPoint (dr1,dr2):
     """
-    Determines the k-value of the location along segment a that is equidistant 
-    to the two vertices b1 and b2 represented by dr1 and dr2, i.e. the location 
-    at which the nearest component of a “switches” from b1 to b2. 
+    Determines the k-value of the location along segment a that crosses from
+    the Voronoi cell around v1 into the Voronoi cell around v2
 
     Parameters
     ----------
@@ -672,10 +850,11 @@ def vertVertSwitchPoint (dr1,dr2):
 
     Returns : [k] - list containing one float representing the k-value of the switch point
     
-    # MT and LJ
+    # MT and LJ; directionality introduced by BK
     """
-    #checks to see if k values for dr1 and dr2 are not equal
-    if dr1[1] != dr2[1]:
+    # return crossing only if v2 is to the right of v1
+#     #check to see if absolute values of k for dr1 and dr2 are not equal
+    if abs(dr2[1]) > abs(dr1[1]):
         #calculates k value for switch point
         k = [((dr2[2]**2 - dr1[2]**2) + (dr2[1]**2 - dr1[1]**2)) / (2 * (dr2[1]-dr1[1]))] 
     else:
@@ -683,7 +862,39 @@ def vertVertSwitchPoint (dr1,dr2):
         k = []
     return k
 
-def candidateComponents(A,B,a):
+def b_box(B,b):
+    """ Creates a box around segment b"""
+    left = min(B[b][0],B[b+1][0])
+    bottom = min(B[b][1],B[b+1][1])
+    right = max(B[b][0],B[b+1][0])
+    top = max(B[b][1],B[b+1][1])
+    return (left,bottom,right,top)    
+
+def seg_idx(B):
+    """
+    Creates an r-tree index of the segments in polyline B.
+
+    Parameters
+    ----------
+    B : [(x,y),...] list of tuples 
+        A polyline.
+
+    Returns
+    -------
+    r : r-tree index
+        Index for searching.
+
+    """
+    # use stream loading, as in 
+    # https://rtree.readthedocs.io/en/latest/performance.html
+    boxes = [b_box(B,b) for b in range(len(B)-1)]
+    def gen_func():
+        for i, box in enumerate(boxes):
+            yield (i,box,i)
+    r = index.Index(gen_func())
+    return r
+
+def candidateComponents(A,B,a,d1,d2,B_seg_idx):
     """
     Identifies all components of B that could be the target of the Hausdorff 
     distance from segment a on A.
@@ -696,21 +907,67 @@ def candidateComponents(A,B,a):
         The coordinates of the other polyline.
     a : int
         The index of a segment on polyline A.
+    d1 : float
+        Distance from vertex a to nearest component on B.
+    d2 : float
+        Distance from vertex a+1 to nearest component on B.
+    B_seg_idx : rtree index
+        Index of segments on B.
+        
     Returns
     ----------
     [(bool, int)]
         A list of candidate components on B.
     """
-    # for now, simply return a list of all components of B
-    result = []
-    # get vertex components
-    for i in range(len(B)):
-        result.append((False,i))
-    for i in range(len(B)-1):
-        result.append((True,i))
-    return result
 
-def nearSegment(A,B,a):
+    # **********
+    # function hu.candidateComponents can be adjusted to use R-tree
+    # to reduce number of components to check
+    # let L be length of a, d1 and d2 be vertDist[a] and vertDist[a+1]
+    # then only need to search square centered on k = 0.5 + (d2-d1)/2L
+    # with radius (L+d1+d2)/2
+    # **********
+
+
+    brute_force = True
+    
+    if brute_force:
+        # OLD
+        # for now, simply return a list of all components of B
+        result = []
+        # get vertex components
+        for i in range(len(B)):
+            result.append((False,i))
+        for i in range(len(B)-1):
+            result.append((True,i))
+        return result
+
+    else:
+        # NEW - USE R-TREE INDEX FOR EFFICIENCY
+        result = []
+        L = g.distance(A[a], A[a+1]) # length of segment a
+        # k-value of square center
+        if L==0:
+            k=0 # in case we have duplicate points
+        else:
+            k = 0.5 + (d2-d1/(2*L))
+        m = g.location(A, a, k) # square center
+        radius = (L+d1+d2)/2
+        square = (m[0]-radius,m[1]-radius,m[0]+radius,m[1]+radius)
+        segs = list(B_seg_idx.intersection(square))
+        verts = set()
+        [verts.add(s) for s in segs]
+        [verts.add(s+1) for s in segs]
+        verts = list(verts)
+        for s in segs:
+            result.append((True,s))
+        for v in verts:
+            result.append((False,v))
+        
+        return result
+
+
+def nearSegment(A,B,a, B_seg_idx):
     """
     Identifies the segment of of B nearest to vertex a on A.
 
@@ -722,6 +979,8 @@ def nearSegment(A,B,a):
         The coordinates of the other polyline.
     a : int
         The index of a vertex on polyline A.
+    B_seg_idx : rtree index
+        Index of B segments for faster searching.
     Returns
     ----------
     int
@@ -732,15 +991,48 @@ def nearSegment(A,B,a):
     # later this should be updated to use an indexing structure such as 
     # an r-tree for computational efficiency
     # initialize to first segment
-    min_index = 0
-    min_d = g.distance_to_segment(A[a], B[0], B[1])
-    # check other segments
-    for b in range(1,len(B)-1):
-        d = g.distance_to_segment(A[a],B[b],B[b+1])
-        if d < min_d:
-            min_d = d
-            min_index = b
-    return min_index
+
+    brute_force = True 
+
+    if brute_force:
+        # OLD
+        min_index = 0
+        min_d = g.distance_to_segment(A[a], B[0], B[1])
+        # check other segments
+        for b in range(1,len(B)-1):
+            d = g.distance_to_segment(A[a],B[b],B[b+1])
+            if d < min_d:
+                min_d = d
+                min_index = b
+        return min_index
+
+    else:    
+        # NEW - USE R-TREE FOR EFFICIENCY
+        min_index = 0
+        abox = (A[a][0],A[a][1],A[a][0],A[a][1])
+        # get index of "first guess" segment with nearest bounding box
+        fg = list(B_seg_idx.nearest(abox,1))[0]
+    
+        # get distance fgd to first guess
+        fgd = g.distance_to_segment(A[a],B[fg],B[fg+1])
+    
+        # get all segments in square of radius fgd around a
+        square = (A[a][0]-fgd,A[a][1]-fgd,A[a][0]+fgd,A[a][1]+fgd)
+        cands = list(B_seg_idx.intersection(square))
+        
+        # loop through segments to find closest
+        min_d = fgd
+        min_index = fg
+        # check other segments
+        for b in cands:
+            d = g.distance_to_segment(A[a],B[b],B[b+1])
+            if d < min_d:
+                min_d = d
+                min_index = b    
+        return min_index
+    
+
+    
 
 def nearComponent(A,B,a,b):
     """
@@ -806,7 +1098,7 @@ def nearLoc(srcloc,trgline,trgcomp):
         The nearest location on the target component to the source location.
     """
     if trgcomp[0] == False: # target is a vertex
-        return trgline[trgcomp[0]]
+        return trgline[trgcomp[1]]
     else: # target is a segment
         trgstart = trgline[trgcomp[1]]
         trgend = trgline[trgcomp[1]+1]
