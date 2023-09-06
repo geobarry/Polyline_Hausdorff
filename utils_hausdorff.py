@@ -208,7 +208,7 @@ def segDistance(dr,k,len_a):
     """
     # check if segments are parallel
     if dr[1] == None:
-        return dr[2] * len_a
+        return abs(dr[2] * len_a)
     else: # normal case
         # segDistance formula
         segDist=abs((k-dr[1])*len_a*dr[2])
@@ -444,7 +444,7 @@ def vertDistance(dr, k, len_a):
     d = ((k-dr[1])**2) + (dr[2]**2)
     d = m.sqrt(d)
     d = len_a * d
-    return d
+    return abs(d)
 
 def vertDistRep(A,B,a,b):
     """

@@ -104,7 +104,7 @@ def test_hausdorff_segment(A,B,a,verbose=False, titleprefix="",savefolder= ""):
     imagefile = ""
     if savefolder != "" and savefolder != None:
         imagefile = r"{}\{}.png".format(savefolder,titleprefix)
-    plot_hausdorff_solution(A, a, B, title = "{}:  {}".format(titleprefix, msg), imagefile = imagefile, show_labels = True)
+    plot_hausdorff_solution(A, a, B, title = "{}:  {}".format(titleprefix, msg), imagefile = imagefile, show_labels = True,dpi = 200,k = 1)
 
 
 def test_all_hausdorff_segments(A,B,verbose=False,titleprefix="",do_reverse = False,savefolder=None):
@@ -187,11 +187,11 @@ savefolder = r"C:\CaGIS Board Dropbox\cantaloupe bob\Research\Projects\line_diff
                
 savefolder = r"C:\temp"               
 
-# test_all_cases_visually(savefolder = savefolder)
+test_all_cases_visually(savefolder = savefolder)
 
 A,B = case(6)
 
-plot_hausdorff_solution(A, 0, B, show_labels = True, k_use_hausdorff=False,k=0.15)
+# plot_hausdorff_solution(A, 0, B, show_labels = True, k_use_hausdorff=False,k=0.15)
 
 # test_case_visually(0,0,False) # case from Hangouet
 # test_case_visually(9,0)
