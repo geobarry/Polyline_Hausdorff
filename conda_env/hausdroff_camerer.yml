@@ -1,0 +1,14 @@
+name: hausdroff_camerer
+channels:
+  - defaults
+dependencies:
+  - defaults::scipy
+  - conda-forge::geopandas
+  - python=3.11
+  - scikit-learn-intelex
+  - multiprocess
+  - boto3
+  - imageio
+  - imageio-ffmpeg
+  - flake8
+prefix: /home/acamerer/miniconda3/envs/hausdroff_camerer
