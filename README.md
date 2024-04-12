@@ -22,24 +22,29 @@ The code follows the general algorithm described in:
 
 [J.F. Hangou&#0235;t (1995). Computation of the Hausdorff distance between plane vector polylines. *Proceedings of the International Symposium on Computer-Assistated Cartography (AutoCarto XII).*](https://cartogis.org/docs/proceedings/archive/auto-carto-12/pdf/computation-of-the-hausdorff-distance-between-plane.pdf)
 
-# How robust is it?
-Update (Dec 2021): More thorough testing has revealed errors in the output of this code. Please do not use until further notice.
-******
-Moderately robust. The code has been tested on several cases including coincident, overlapping and perpendicular line segments with random transformations to catch problems involving floating point precision arithmetic. Some modifications to Hangou&#0235;t's algorithm were made to correctly handle special cases. That said, only a few scenarios have been tested and further testing is warranted for production-level usage. 
+The algorithm has been updated in several ways to ensure robustness and improve computational efficiency. Details on these improvements are currently being prepared for publication.
 
+# Current Status (updated Apr 2024)
+This is still a working process. The code is functional but has not been cleaned, organized and documented so usage is not recommended except for research purposes.
+
+## Robustness
+The code has been tested on several cases including coincident, overlapping and perpendicular line segments with random transformations to catch problems involving floating point precision arithmetic. It appears to be robust but further testing is warranted for production-level usage. 
+C
+## Computational Efficiency
+Computational efficiency has been improved with a "three-circle-filter" and is usually subquadratic but approaches cubic running time in the very unlikely worst case scenario. 
+
+## Code Testing
 Test functions are included for all subsidiary functions as well as the main function. To perform additional tests, add coordinates for pairs of polyines you wish to test to the `case` function in `test_utils.py` and then run `test_polyline_hausdroff.py`.
 
-# How efficient is it?
-At present the code is very inefficient, O(n<sup>3</sup>). Efficiency could be improved with the use of a spatial index. 
-
 # Who created this?
-This code is the culmination of a group project by students in the Spring 2021 section of **GEO 4910: GIS Programming** at Eastern Illinois University. Team members are:
+This code is being developed by Dr. Barry Kronenfeld at Eastern Illinois University with support from the USGS. However this repository has not been approved or endorsed by EIU or the USGS. 
+
+Much of the code for the Hausdorff distance calculation was developed by students in the Spring 2021 section of **GEO 4910: GIS Programming** at Eastern Illinois University. Team members are:
 
 * Luke Jansen
 * Tanner Jones
 * Farouk Olaitan
 * Megshi Thakur
-* Barry Kronenfeld (instructor)
 
 # Is this free to use?
 Yes, it is licensed with the open source MIT License. If you find this useful, acknowledgement would be appreciated.
