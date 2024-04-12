@@ -57,6 +57,7 @@ DEFINITIONS:
 
 import utils_geom as g
 import utils_hausdorff as hu
+import integrals
 
 def polyline_hausdorff(A,B):
     """
@@ -96,8 +97,8 @@ def polyline_hausdorff(A,B):
         polyline.    
     """
     # check in both directions
-    h_dist_a,srcloca,srccompa,trgcompsa = hausdorff_unidirectional(A,B)
-    h_dist_b,srclocb,srccompb,trgcompsb = hausdorff_unidirectional(B,A)
+    h_dist_a,srcloca,srccompa,trgcompsa = directional_polyline_hausdorff(A,B)
+    h_dist_b,srclocb,srccompb,trgcompsb = directional_polyline_hausdorff(B,A)
     # determine which is source and which is target    
     if h_dist_a > h_dist_b:
         srcloc = srcloca
@@ -120,7 +121,108 @@ def polyline_hausdorff(A,B):
     return h,srcloc,srcline,srccomp,trglocs,trgcomps
 
 
-def hausdorff_unidirectional(A,B):
+def directional_polyline_avg_dist(A,B,brute_force = False):
+    """
+    Computes the one-way average distance from A to B
+
+    Parameters
+    ----------
+    A : [(x,y),...] list of tuples 
+        The coordinates of the main polyline.
+    B : [(x,y),...] list of tuples 
+        The coordinates of the other polyline.
+    Returns
+    ----------
+    avgD : float
+        The unidirectional avg distance between the polylines.
+    """
+
+    # initialize component and distance lists
+    vNearComp = []
+    vNearLoc = []
+    vertDist = []
+    # create index of B segments
+    B_seg_idx = hu.seg_idx(B)
+
+    # get distance from each vertex on A to its nearest component on B
+    for a in range(len(A)):
+        # **********
+        # function hu.nearSegment can be adjusted to use R-tree
+        # **********
+        b = hu.nearSegment(A, B, a, B_seg_idx)
+        comp, nearloc, d = hu.nearComponent(A, B, a, b)
+        vNearComp.append(comp)
+        vNearLoc.append(nearloc)
+        vertDist.append(d)
+
+    # get distance from segments on A to nearest components on B
+    tot_area = 0
+    tot_len = 0
+    for a in range(len(A)-1):
+        comp_list = hu.candidateComponents(
+            A,B,a,
+            vNearLoc[a],vNearLoc[a+1],
+            vertDist[a],vertDist[a+1],
+            B_seg_idx,brute_force
+            )
+        near_comps = segment_traversal(A, B, a, vNearComp[a],vertDist[a],vNearComp[a+1],vertDist[a+1], comp_list)
+        L = g.distance(A[a], A[a+1])
+        tot_len += L
+        area = segment_dist_integral(near_comps, L)
+        tot_area += area
+    return tot_area/tot_len
+
+
+def near_components(A,B):
+    """
+    Computes the sequence of nearest components on B from locations on polyline A
+
+    Parameters
+    ----------
+    A : [(x,y),...] list of tuples 
+        The coordinates of the main polyline.
+    B : [(x,y),...] list of tuples 
+        The coordinates of the other polyline.
+    Returns
+    ----------
+    [a,k,d,comp,rep] : float
+        The segment on A, k-value and distance at the start of the section, 
+        and nearest component on B and its nearest distance representation
+        for successive sections on polyline A
+    """
+
+    # initialize component and distance lists
+    vNearComp = []
+    vNearLoc = []
+    vertDist = []
+    # create index of B segments
+    B_seg_idx = hu.seg_idx(B)
+
+    # get distance from each vertex on A to its nearest component on B
+    for a in range(len(A)):
+        b = hu.nearSegment(A, B, a, B_seg_idx)
+        comp, nearloc, d = hu.nearComponent(A, B, a, b)
+        vNearComp.append(comp)
+        vNearLoc.append(nearloc)
+        vertDist.append(d)
+
+    segsToCheck = [a for a in range(len(A)-1) if hu.checkSegment(vNearComp[a],vNearComp[a+1])]
+    # get distance from segments on A to nearest components on B
+    a_k_d_comp_rep = []
+    for a in segsToCheck:
+        comp_list = hu.candidateComponents(
+            A,B,a,
+            vNearLoc[a],vNearLoc[a+1],
+            vertDist[a],vertDist[a+1],
+            B_seg_idx,False
+            )
+        near_comps = segment_traversal(A, B, a, vNearComp[a],vertDist[a],vNearComp[a+1],vertDist[a+1], comp_list)
+        # near_comps : list of (d,k,comp,rep)
+        for d,k,comp,rep in near_comps:
+            a_k_d_comp_rep.append((a,k,d,comp,rep))
+    return a_k_d_comp_rep
+
+def directional_polyline_hausdorff(A,B,brute_force = False):
     """
     Computes the one-way Hausdorff distance from A to B, i.e. the maximum
     distance from any point on A to the nearest point on B.
@@ -148,28 +250,32 @@ def hausdorff_unidirectional(A,B):
 
     # initialize component and distance lists
     vNearComp = []
+    vNearLoc = []
     vertDist = []
     # create index of B segments
     B_seg_idx = hu.seg_idx(B)
 
     # get distance from each vertex on A to its nearest component on B
     for a in range(len(A)):
-        # **********
-        # function hu.nearSegment can be adjusted to use R-tree
-        # **********
         b = hu.nearSegment(A, B, a, B_seg_idx)
-        comp, d = hu.nearComponent(A, B, a, b)
+        comp, nearloc, d = hu.nearComponent(A, B, a, b)
         vNearComp.append(comp)
+        vNearLoc.append(nearloc)
         vertDist.append(d)
 
     segsToCheck = [a for a in range(len(A)-1) if hu.checkSegment(vNearComp[a],vNearComp[a+1])]
     # get distance from segments on A to nearest components on B
     d_k_comps = []
     for a in segsToCheck:
-        comp_list = hu.candidateComponents(A,B,a,vertDist[a],vertDist[a+1],B_seg_idx)
+        comp_list = hu.candidateComponents(
+            A,B,a,
+            vNearLoc[a],vNearLoc[a+1],
+            vertDist[a],vertDist[a+1],
+            B_seg_idx,brute_force
+            )
         near_comps = segment_traversal(A, B, a, vNearComp[a],vertDist[a],vNearComp[a+1],vertDist[a+1], comp_list)
-        d,k,comps = hausdorff_segment(near_comps)
-#         d,k,comps = hausdorff_segment(A, B, a, vNearComp[a],vertDist[a],vNearComp[a+1],vertDist[a+1], comp_list)
+        d,k,comps = segment_hausdorff(near_comps)
+#         d,k,comps = segment_hausdorff(A, B, a, vNearComp[a],vertDist[a],vNearComp[a+1],vertDist[a+1], comp_list)
         d_k_comps.append((d,k,comps))
     # Hausdorff distance is maximum of distances from vertices and segments
     use_vert = True
@@ -193,9 +299,10 @@ def hausdorff_unidirectional(A,B):
     
     return H,loc,srcComp,trgComps
 
-def hausdorff_segment(seg_traversal, verbose = False):
+def segment_hausdorff(seg_traversal, verbose = False):
     """
-    identifies the Hausdorff distance from a traversal of a segment
+    Identifies the Hausdorff distance from a traversal of a segment.
+    
     Parameters
     ----------
     seg_traversal : [(float,float,comp,dist_rep),...] list of tuples 
@@ -231,6 +338,35 @@ def hausdorff_segment(seg_traversal, verbose = False):
         print("red dot is furthest point on A from B")
         print("nearest components on B to red dot: {}".format(",".join([hu.component_label(comp)for comp in comps])))
     return max_dist,k,comps
+
+def segment_dist_integral(seg_traversal,L, verbose = False):
+    """
+    Compute the integral of the distance function from a traversal of a segment.
+    
+    Parameters
+    ----------
+    seg_traversal : [(float,float,comp,dist_rep),...] list of tuples 
+        list of (d, k, component, distance representation) along traversal of a
+    L : float
+        length of traversed segment
+    Returns
+    ----------
+    area : float
+        The total area under the distance function from segment a to polyline B.
+    """
+    # Loop through traversal to get switch point with maximum distance
+    if verbose:
+        print("\nsections of A nearest to components of B:")
+    tot_area = 0
+    for i in range(len(seg_traversal)-1):
+        d,k0,comp,dr = seg_traversal[i]
+        d1,k1,comp1,dr1 = seg_traversal[i+1]
+        # use first distance representation
+        area = integrals.component_integral(L, k0, k1, dr)        
+        tot_area += area
+        if verbose:
+            print("{:.3f} - {:.3f} {} A={:.3f}".format(k0,k1,hu.component_label(comp),area))
+    return tot_area
 
 def segment_traversal(A,B,a,startComp,startDist,endComp,endDist,comp_list,verbose = False,max_iterations = 1000000):
     """
@@ -404,6 +540,7 @@ def _updateComponent(A,B,a,comps, eis, drs, prev_id, prev_ei, verbose=False, tol
         comp_label = hu.component_label(comps[prev_id])
         print("   FUNCTION: polyline_hausdorff.update_component")
         print("   prev comp: {}   ei: ({:.3f},{:.3f})".format(comp_label,prev_ei[0],prev_ei[1]))
+        print(f"    candidates: {[hu.component_label(c) for c in comps]}")
         dummy = 0
     for cand_id in range(len(comps)):        
         if cand_id != prev_id: # can't return same component!
@@ -413,8 +550,8 @@ def _updateComponent(A,B,a,comps, eis, drs, prev_id, prev_ei, verbose=False, tol
                 print("   testing transition from {} to {}".format(prev_label,cand_label))
             cand_dr = drs[cand_id] #  distance representation of new candidate
             cand_ei = eis[cand_id] #  effective interval of new candidate
-            # if verbose:
-            #     print('      ei: ({:.3f},{:.3f})'.format(cand_ei[0],cand_ei[1]))
+            if verbose:
+                print('      ei: ({:.3f},{:.3f})'.format(cand_ei[0],cand_ei[1]))
             if len(cand_ei) > 0 and cand_ei != (float('-inf'),float('-inf')): # check if component has an effective interval
                 ks = hu.switchPoint(drs[prev_id], cand_dr) # k-values of switch points w/ current component and new candidate
                 if verbose:
@@ -486,7 +623,7 @@ def _updateComponent(A,B,a,comps, eis, drs, prev_id, prev_ei, verbose=False, tol
     if new_comp_id == -1 and prev_ei[1] < 1:
         # let's see if this is ever invoked
         comp_label = hu.component_label(comps[prev_id])
-        print("   adjacent component search invoked from {}".format(comp_label))
+        # (print)("   adjacent component search invoked from {}".format(comp_label))
         # get adjacent components
         b = comps[prev_id][1]        
         if comps[prev_id][0] == True: # segment

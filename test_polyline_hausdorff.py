@@ -49,10 +49,10 @@ class hausdorff_tests(unittest.TestCase):
                     D_seg_idx = hu.seg_idx(D)
                     startNearSeg = hu.nearSegment(C, D, seg, D_seg_idx)
                     endNearSeg = hu.nearSegment(C, D, seg+1, D_seg_idx)
-                    startcomp, startd = hu.nearComponent(C, D, seg, startNearSeg)
-                    endcomp, endd = hu.nearComponent(C, D, seg+1, endNearSeg)
+                    startcomp,startnearloc, startd = hu.nearComponent(C, D, seg, startNearSeg)
+                    endcomp,startnearloc, endd = hu.nearComponent(C, D, seg+1, endNearSeg)
                     candidates = hu.candidateComponents(C,D,seg,startd,endd,D_seg_idx)
-                    d,k,comps = h.hausdorff_segment(C, D, seg, startcomp, startd, endcomp, endd, candidates)
+                    d,k,comps = h.segment_hausdorff(C, D, seg, startcomp, startd, endcomp, endd, candidates)
                     return d,k,comps
                 def make_comparison(A,B,Aprime,Bprime,seg):
                     # original
@@ -65,9 +65,9 @@ class hausdorff_tests(unittest.TestCase):
                     if abs(d-dprime) > 0.001:
                         print("dprime: {}".format(dprime))
                         print("\nORIGINAL")
-                        test_hausdorff_segment(A,B,seg,True,report + " original ")
+                        test_segment_hausdorff(A,B,seg,True,report + " original ")
                         print("\nTRANSFORMED")
-                        test_hausdorff_segment(Aprime,Bprime,seg,True,report + " transformed ")
+                        test_segment_hausdorff(Aprime,Bprime,seg,True,report + " transformed ")
                     self.assertAlmostEqual(d,dprime,msg=report)
                 # from A
                 for seg in range(len(A)-1):
@@ -76,45 +76,49 @@ class hausdorff_tests(unittest.TestCase):
                 for seg in range(len(B)-1):
                     make_comparison(B,A,Bprime,Aprime,seg)
             
-def test_hausdorff_segment(A,B,a,verbose=False, titleprefix="",savefolder= ""):    
+def test_segment_hausdorff(A,B,a,verbose=False, titleprefix="",savefolder= ""):    
     B_idx = hu.seg_idx(B)
     startNearSeg = hu.nearSegment(A, B,a,B_idx)
     endNearSeg = hu.nearSegment(A, B, a+1,B_idx)
-    startcomp, startd = hu.nearComponent(A, B, a, startNearSeg)
-    endcomp, endd = hu.nearComponent(A, B, a+1, endNearSeg)
-    candidates = hu.candidateComponents(A,B,a,startd,endd,B_idx)
+    startcomp, startnearloc, startd = hu.nearComponent(A, B, a, startNearSeg)
+    endcomp, endnearloc, endd = hu.nearComponent(A, B, a+1, endNearSeg)
+    candidates = hu.candidateComponents(A,B,a,startnearloc,endnearloc,startd,endd,B_idx)
+    if verbose:
+        print(f"test_segment_hausdorff: candidates = {[hu.component_label(c) for c in candidates]}")
     near_comps = h.segment_traversal(A, B, a, startcomp, startd, endcomp, endd, candidates,verbose)
-    d,k,hausdorff_comps = h.hausdorff_segment(near_comps, verbose)
+    d,k,hausdorff_comps = h.segment_hausdorff(near_comps, verbose)
     msg = ""
     
-    if True:
-        # show sequence of nearest components
-        msg += " -> ".join([hu.component_label(near_comps[i][2])for i in range(len(near_comps))])
-    elif len(hausdorff_comps)==1:
-        # show Hausdorff component
-        msg += "to {}".format(hu.component_label(hausdorff_comps[0]))
-    else:
-        msg += "to {} and {}".format(hu.component_label(hausdorff_comps[0]),hu.component_label(hausdorff_comps[1]))
-    msg += '   (dist: {:.3f})'.format(d)
+    # if verbose:
+    #     # show sequence of nearest components
+    #     msg += " -> ".join([hu.component_label(near_comps[i][2])for i in range(len(near_comps))])
+    # elif len(hausdorff_comps)==1:
+    #     # show Hausdorff component
+    #     msg += "to {}".format(hu.component_label(hausdorff_comps[0]))
+    # else:
+    #     msg += "to {} and {}".format(hu.component_label(hausdorff_comps[0]),hu.component_label(hausdorff_comps[1]))
+    # msg += '   (dist: {:.3f})'.format(d)
     try:
         x = A[a][0] + k * (A[a+1][0]-A[a][0])
     except:
         print("k: {}".format(k))
     y = A[a][1] + k * (A[a+1][1]-A[a][1])
     imagefile = ""
+    dpi = 90
     if savefolder != "" and savefolder != None:
         imagefile = r"{}\{}.png".format(savefolder,titleprefix)
-    plot_hausdorff_solution(A, a, B, title = "{}:  {}".format(titleprefix, msg), imagefile = imagefile, show_labels = True,dpi = 200,k = 1)
+        dpi = 150
+    plot_hausdorff_solution(A, a, B, title = "{}:  {}".format(titleprefix, msg), imagefile = imagefile, show_labels = True,dpi = dpi)
 
 
-def test_all_hausdorff_segments(A,B,verbose=False,titleprefix="",do_reverse = False,savefolder=None):
+def test_all_segment_hausdorffs(A,B,verbose=False,titleprefix="",do_reverse = False,savefolder=None):
     for a in range(len(A)-1):
         print("polyline A segment {}...".format(a))
-        test_hausdorff_segment(A,B,a,verbose,titleprefix + "-{}".format(a),savefolder)
+        test_segment_hausdorff(A,B,a,verbose,titleprefix + "-{}".format(a),savefolder)
     if do_reverse:
         for b in range(len(B)-1):
             print("polyline B segment {}...".format(b))
-            test_hausdorff_segment(B,A,b,verbose,titleprefix + "-{}-rev".format(b),savefolder)
+            test_segment_hausdorff(B,A,b,verbose,titleprefix + "-{}-rev".format(b),savefolder)
 
 def printComponentInfo(A,B,a,comps):
     # print out switch points
@@ -157,7 +161,7 @@ def test_all_cases_visually(savefolder = None):
     for s in range(case(-1)):
         print("CASE {}".format(s))
         A,B = case(s)
-        test_all_hausdorff_segments(A, B, verbose=False, titleprefix="Case {}".format(s),savefolder = savefolder)
+        test_all_segment_hausdorffs(A, B, verbose=False, titleprefix="Case {}".format(s),savefolder = savefolder)
     print("\nTO CHECK RESULTS:")
     print("Review all diagrams. The red point should be the location on the")
     print("highlighted orange segment that is furthest from the blue polyline.")
@@ -165,50 +169,27 @@ def test_all_cases_visually(savefolder = None):
     print("locations, indicating the location(s) on the blue polyline that are ")
     print("closest to the red point.")
 
-def test_case_visually(case_number, seg, reverse = False):
-    if reverse:
-        B,A = case(case_number)
-        direction = "_rev"
-    else:
-        A,B = case(case_number)
-        direction = ""
-    msg = "case {}{}_s{}".format(case_number,direction,seg)
-    test_hausdorff_segment(A,B,seg,True,msg)
-
 def test_overlap():
     A,B = case(2)
     verbose = True
-    test_hausdorff_segment(A,B,1,verbose,"overlap ")
+    test_segment_hausdorff(A,B,1,verbose,"overlap ")
 
 
 
-#unittest.main()
-savefolder = r"C:\CaGIS Board Dropbox\cantaloupe bob\Research\Projects\line_difference_metrics\Hausdorff\images\test_cases_v2"
-               
-savefolder = r"C:\temp"               
-
-test_all_cases_visually(savefolder = savefolder)
-
-A,B = case(6)
-
+#unittest.main()193
 # plot_hausdorff_solution(A, 0, B, show_labels = True, k_use_hausdorff=False,k=0.15)
-
-# test_case_visually(0,0,False) # case from Hangouet
-# test_case_visually(9,0)
-
-# A,B = case(9)
 # hu.distanceRepresentation(A, B, 0, (True,3))
-
-# test_case_visually(0,0) # going backwards from vertex to segment
-# test_case_visually(4,1,False) # navigating along the straight set of segments
-# test_case_visually(6,2,True)
-
-# test_case_visually(2,1)
-# test_case_visually(2,2,True)
-
-# test_case_visually(6,0,False) # situation where we have to double back
-# test_case_visually(4,0,True)
-
-# test_case_visually(5,1) # navigating along straight set of segments
 # test_overlap()
+
+# savefolder = r"C:\temp"               
+savefolder = ""
+# test_all_cases_visually(savefolder = savefolder)
+               
+case_number = 1
+seg = 0
+A,B = case(case_number)
+msg = "case {}_s{}".format(case_number,seg)
+test_segment_hausdorff(A,B,seg,True,msg)
+
+
 print("\nfinished.")

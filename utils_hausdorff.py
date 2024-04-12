@@ -1,7 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Created on Wed May 26 13:29:02 2021
+Hausdorff Utilities (utils_hausdorff.py)
+Geometry, vertex and segment components, distance representations,
+effective intervals, switch points and other functions required to
+calculate the house doff distance. Most of these are taken from
+Hangouet 1995, with modifications.
 
+Created on Wed May 26 13:29:02 2021
 @author: bjkronenfeld
 """
 import math as m
@@ -9,6 +14,13 @@ import utils_geom as g
 import numpy as np
 from rtree import index
 
+def distAcross(comp,dr,interval,len_a,n = 50):
+    if comp[0]:
+        # component is a segment
+        return segDistAcross(dr, interval, len_a)   
+    else:
+        return vertDistAcross(dr, interval, len_a)
+    
 def vertDistAcross(vdr,interval, len_a,n=50):
     """
     returns a list of points defining the distance function from the vertex
@@ -894,7 +906,7 @@ def seg_idx(B):
     r = index.Index(gen_func())
     return r
 
-def candidateComponents(A,B,a,d1,d2,B_seg_idx):
+def candidateComponents(A,B,a,nl1,nl2,d1,d2,B_seg_idx,brute_force = False):
     """
     Identifies all components of B that could be the target of the Hausdorff 
     distance from segment a on A.
@@ -923,14 +935,8 @@ def candidateComponents(A,B,a,d1,d2,B_seg_idx):
     # **********
     # function hu.candidateComponents can be adjusted to use R-tree
     # to reduce number of components to check
-    # let L be length of a, d1 and d2 be vertDist[a] and vertDist[a+1]
-    # then only need to search square centered on k = 0.5 + (d2-d1)/2L
-    # with radius (L+d1+d2)/2
     # **********
 
-
-    brute_force = True
-    
     if brute_force:
         # OLD
         # for now, simply return a list of all components of B
@@ -945,15 +951,35 @@ def candidateComponents(A,B,a,d1,d2,B_seg_idx):
     else:
         # NEW - USE R-TREE INDEX FOR EFFICIENCY
         result = []
-        L = g.distance(A[a], A[a+1]) # length of segment a
-        # k-value of square center
-        if L==0:
-            k=0 # in case we have duplicate points
-        else:
-            k = 0.5 + (d2-d1/(2*L))
-        m = g.location(A, a, k) # square center
-        radius = (L+d1+d2)/2
-        square = (m[0]-radius,m[1]-radius,m[0]+radius,m[1]+radius)
+        # radii of three circles
+        r1 = d1 # circle centered on A[a]
+        r2 = d2 # circle centered on A[a+1]
+        # Center two near locations on B
+        bc = ((nl1[0] + nl2[0])/2, (nl1[1] + nl2[1])/2)
+        # Slope of line between two near locations on B
+        bdx = nl2[0] - nl1[0]
+        bdy = nl2[1] - nl1[1]
+        # Two points on perpendicular bisector of above line
+        perp_1 = (bc[0] + bdy, bc[1] - bdx)
+        perp_2 = (bc[0] - bdy, bc[1] + bdx)
+        # Point on segment a equidistant to two near locations
+        # calculated as intersection between perpendicular bisector and seg a
+        anchor = g.intersection(perp_1, perp_2, A[a], A[a+1])
+        if anchor == (None,None):
+            # if perp bisector is parallel to seg a, anchor is w
+            # on line between near locations
+            anchor = g.intersection(nl1, nl2, A[a], A[a+1])
+        # third radius is from anchor
+        rc = g.distance(anchor,nl1)
+        
+        # get bounds of search
+        xmin = min(A[a][0] - r1, A[a+1][0] - r2, anchor[0] - rc)
+        xmax = max(A[a][0] + r1, A[a+1][0] + r2, anchor[0] + rc)
+        ymin = min(A[a][1] - r1, A[a+1][1] - r2, anchor[1] - rc)
+        ymax = max(A[a][1] + r1, A[a+1][1] + r2, anchor[1] + rc)
+
+        # search for candidate components using index        
+        square = (xmin,ymin,xmax,ymax)       
         segs = list(B_seg_idx.intersection(square))
         verts = set()
         [verts.add(s) for s in segs]
@@ -992,7 +1018,7 @@ def nearSegment(A,B,a, B_seg_idx):
     # an r-tree for computational efficiency
     # initialize to first segment
 
-    brute_force = True 
+    brute_force = False
 
     if brute_force:
         # OLD
@@ -1050,8 +1076,8 @@ def nearComponent(A,B,a,b):
         The index of a segment on polyline B.
     Returns
     ----------
-    (component, float)
-        The nearest component of B along with its distance from vertex a.
+    (component, (float,float), float)
+        The nearest component, pt and distance from vertex a of B
     """
     # # get distances from each component
     # d_seg = g.distance_to_segment(A[a],B[b],B[b+1])
@@ -1070,13 +1096,13 @@ def nearComponent(A,B,a,b):
     k = g.kvalue(prj, B[b], B[b+1])
     if k <= 0: # return vertex b
         d = g.distance(A[a],B[b])
-        return ((False,b),d)
+        return ((False,b),B[b],d)
     elif k >= 1: # return vertex b+1
         d = g.distance(A[a],B[b+1])
-        return ((False,b+1),d)
+        return ((False,b+1),B[b+1],d)
     else: # return segment b
         d = g.distance(A[a],prj)
-        return ((True,b),d)        
+        return ((True,b),prj,d)        
 
 def nearLoc(srcloc,trgline,trgcomp):
     """
